@@ -2,6 +2,7 @@ package com.prince.aiassistant
 
 import android.Manifest
 import android.accessibilityservice.AccessibilityServiceInfo
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -30,9 +31,6 @@ import android.widget.Spinner
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
-import androidx.appcompat.app.AppCompatActivity
-import androidx.core.app.ActivityCompat
-import androidx.core.content.ContextCompat
 import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
@@ -46,7 +44,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : Activity() {
 
     companion object {
         const val WEB_CLIENT_ID = "699686277295-1sgitrrfof9cnv4btgeltprdfskdl918.apps.googleusercontent.com"
@@ -67,7 +65,7 @@ class MainActivity : AppCompatActivity() {
 
     // Tab 0 (Home)
     private lateinit var homeView: View
-    private lateinit var heroOrbView: ProAiOrbView
+    private lateinit var heroOrbBadge: TextView
     private lateinit var floatingOrbSwitch: Switch
     private lateinit var commandInput: EditText
 
@@ -131,12 +129,12 @@ class MainActivity : AppCompatActivity() {
             setPadding(32, 32, 32, 32)
         }
         val tv = TextView(this).apply {
-            text = "Nischay Pulse Recovery\n\n${err.javaClass.simpleName}: ${err.message}"
+            text = "Nischay Pulse Error:\n\n${err.javaClass.simpleName}: ${err.message}"
             textSize = 13f
             setTextColor(Color.parseColor("#FACC15"))
         }
         val btn = Button(this).apply {
-            text = "सीधे डैशबोर्ड खोलें"
+            text = "डैशबोर्ड खोलें"
             setOnClickListener {
                 try {
                     rebuildEntireScreen()
@@ -157,6 +155,25 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun makeOrbCircleView(sizeDp: Int, label: String, textSp: Float): TextView {
+        val px = (sizeDp * resources.displayMetrics.density).toInt()
+        return TextView(this).apply {
+            text = label
+            textSize = textSp
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(px, px)
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                intArrayOf(Color.parseColor("#0EA5E9"), Color.parseColor("#6366F1"), Color.parseColor("#10B981"))
+            ).apply {
+                shape = GradientDrawable.OVAL
+                setStroke(6, Color.parseColor("#38BDF8"))
+            }
+        }
+    }
+
     private fun showCustomSplashScreen() {
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -165,11 +182,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(40, 40, 40, 40)
         }
 
-        val orbSize = (150 * resources.displayMetrics.density).toInt()
-        val orb = ProAiOrbView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(orbSize, orbSize)
-            setOrbState(ProAiOrbView.State.THINKING)
-        }
+        val logoCircle = makeOrbCircleView(130, "N", 54f)
 
         val title = TextView(this).apply {
             text = "Nischay Pulse"
@@ -187,7 +200,7 @@ class MainActivity : AppCompatActivity() {
             gravity = Gravity.CENTER
         }
 
-        container.addView(orb)
+        container.addView(logoCircle)
         container.addView(title)
         container.addView(sub)
         setContentView(container)
@@ -200,7 +213,7 @@ class MainActivity : AppCompatActivity() {
                     showCrashRecoveryScreen(e)
                 }
             }
-        }, 1250L)
+        }, 1100L)
     }
 
     private fun routeAfterSplash() {
@@ -263,7 +276,6 @@ class MainActivity : AppCompatActivity() {
                 इस ऐप का उपयोग केवल वैध, सुरक्षित और व्यक्तिगत उत्पादकता कार्यों के लिए किया जाएगा।
             """.trimIndent()
             textSize = 13f
-            lineHeight = (20 * resources.displayMetrics.density).toInt()
             setTextColor(Color.parseColor("#CBD5E1"))
         }
         policyCard.addView(policyBody)
@@ -312,10 +324,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(36, 48, 36, 48)
         }
 
-        val orbSize = (120 * resources.displayMetrics.density).toInt()
-        val orb = ProAiOrbView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(orbSize, orbSize)
-        }
+        val logoCircle = makeOrbCircleView(110, "N", 46f)
 
         val title = TextView(this).apply {
             text = "Google अकाउंट से जुड़ें"
@@ -375,7 +384,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        root.addView(orb)
+        root.addView(logoCircle)
         root.addView(title)
         root.addView(desc)
         root.addView(statusTv)
@@ -448,22 +457,24 @@ class MainActivity : AppCompatActivity() {
 
     private fun requestEssentialPermissions() {
         try {
-            val perms = mutableListOf(
-                Manifest.permission.RECORD_AUDIO,
-                Manifest.permission.CALL_PHONE,
-                Manifest.permission.READ_CONTACTS
-            )
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                perms.add(Manifest.permission.ANSWER_PHONE_CALLS)
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                perms.add(Manifest.permission.POST_NOTIFICATIONS)
-            }
-            val missing = perms.filter {
-                ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
-            }
-            if (missing.isNotEmpty()) {
-                ActivityCompat.requestPermissions(this, missing.toTypedArray(), 101)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val perms = mutableListOf(
+                    Manifest.permission.RECORD_AUDIO,
+                    Manifest.permission.CALL_PHONE,
+                    Manifest.permission.READ_CONTACTS
+                )
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    perms.add(Manifest.permission.ANSWER_PHONE_CALLS)
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    perms.add(Manifest.permission.POST_NOTIFICATIONS)
+                }
+                val missing = perms.filter {
+                    checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED
+                }
+                if (missing.isNotEmpty()) {
+                    requestPermissions(missing.toTypedArray(), 101)
+                }
             }
         } catch (_: Exception) { }
     }
@@ -549,7 +560,6 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.HORIZONTAL
             setBackgroundColor(bgBar)
             setPadding(12, 16, 12, 20)
-            elevation = 16f
         }
 
         navHomeBtn = createNavMenuItem("⚡ Home", 0)
@@ -635,9 +645,8 @@ class MainActivity : AppCompatActivity() {
         toggleRow.addView(toggleLabel)
         toggleRow.addView(floatingOrbSwitch)
 
-        val orbSize = (180 * resources.displayMetrics.density).toInt()
-        heroOrbView = ProAiOrbView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(orbSize, orbSize).apply {
+        heroOrbBadge = makeOrbCircleView(160, "⚡ N", 44f).apply {
+            (layoutParams as LinearLayout.LayoutParams).apply {
                 topMargin = 28
                 bottomMargin = 14
             }
@@ -737,7 +746,7 @@ class MainActivity : AppCompatActivity() {
         inputBar.addView(sendBtn)
 
         layout.addView(toggleRow)
-        layout.addView(heroOrbView)
+        layout.addView(heroOrbBadge)
         layout.addView(hintTv)
         layout.addView(chipScroll)
         layout.addView(spacer)
