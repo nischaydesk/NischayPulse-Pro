@@ -42,7 +42,7 @@ import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 
@@ -53,8 +53,8 @@ class MainActivity : AppCompatActivity() {
         private const val AUTH_PREFS = "nischay_auth_prefs"
     }
 
-    private val uiScope = CoroutineScope(Dispatchers.Main + Job())
-    private lateinit var credentialManager: CredentialManager
+    private val uiScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private var credentialManager: CredentialManager? = null
 
     private var isDarkMode = true
     private var activeTab = 0 // 0 = Home, 1 = Schedule, 2 = History, 3 = Settings
@@ -99,21 +99,61 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        credentialManager = CredentialManager.create(this)
-        isDarkMode = getSharedPreferences("assistant_settings", MODE_PRIVATE).getBoolean("dark_mode", true)
-
-        if (!splashShown) {
-            splashShown = true
-            showCustomSplashScreen()
-        } else {
-            routeAfterSplash()
+        try {
+            credentialManager = CredentialManager.create(this)
+        } catch (_: Throwable) {
+            credentialManager = null
         }
+
+        isDarkMode = try {
+            getSharedPreferences("assistant_settings", MODE_PRIVATE).getBoolean("dark_mode", true)
+        } catch (_: Exception) {
+            true
+        }
+
+        try {
+            if (!splashShown) {
+                splashShown = true
+                showCustomSplashScreen()
+            } else {
+                routeAfterSplash()
+            }
+        } catch (e: Throwable) {
+            showCrashRecoveryScreen(e)
+        }
+    }
+
+    private fun showCrashRecoveryScreen(err: Throwable) {
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setBackgroundColor(Color.parseColor("#050811"))
+            setPadding(32, 32, 32, 32)
+        }
+        val tv = TextView(this).apply {
+            text = "Nischay Pulse Recovery\n\n${err.javaClass.simpleName}: ${err.message}"
+            textSize = 13f
+            setTextColor(Color.parseColor("#FACC15"))
+        }
+        val btn = Button(this).apply {
+            text = "सीधे डैशबोर्ड खोलें"
+            setOnClickListener {
+                try {
+                    rebuildEntireScreen()
+                } catch (_: Throwable) { }
+            }
+        }
+        box.addView(tv)
+        box.addView(btn)
+        setContentView(box)
     }
 
     override fun onResume() {
         super.onResume()
         if (::engineBadge.isInitialized) {
-            updateLiveStates()
+            try {
+                updateLiveStates()
+            } catch (_: Exception) { }
         }
     }
 
@@ -153,7 +193,13 @@ class MainActivity : AppCompatActivity() {
         setContentView(container)
 
         Handler(Looper.getMainLooper()).postDelayed({
-            routeAfterSplash()
+            if (!isFinishing && !isDestroyed) {
+                try {
+                    routeAfterSplash()
+                } catch (e: Throwable) {
+                    showCrashRecoveryScreen(e)
+                }
+            }
         }, 1250L)
     }
 
@@ -340,81 +386,96 @@ class MainActivity : AppCompatActivity() {
 
     private fun launchNativeGoogleAccountPicker(statusTv: TextView) {
         statusTv.visibility = View.VISIBLE
+        val cm = credentialManager
+        if (cm == null) {
+            statusTv.text = "Credential Manager उपलब्ध नहीं है, नीचे से सीधे आगे बढ़ें।"
+            return
+        }
         statusTv.text = "Google अकाउंट सूची खुल रही है..."
 
-        val googleIdOption = GetGoogleIdOption.Builder()
-            .setFilterByAuthorizedAccounts(false)
-            .setServerClientId(WEB_CLIENT_ID)
-            .setAutoSelectEnabled(false)
-            .build()
+        try {
+            val googleIdOption = GetGoogleIdOption.Builder()
+                .setFilterByAuthorizedAccounts(false)
+                .setServerClientId(WEB_CLIENT_ID)
+                .setAutoSelectEnabled(false)
+                .build()
 
-        val request = GetCredentialRequest.Builder()
-            .addCredentialOption(googleIdOption)
-            .build()
+            val request = GetCredentialRequest.Builder()
+                .addCredentialOption(googleIdOption)
+                .build()
 
-        uiScope.launch {
-            try {
-                val result = credentialManager.getCredential(
-                    request = request,
-                    context = this@MainActivity
-                )
-                val credential = result.credential
-                if (credential is CustomCredential &&
-                    credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
-                ) {
-                    val googleCred = GoogleIdTokenCredential.createFrom(credential.data)
-                    val email = googleCred.id
-                    val displayName = googleCred.displayName ?: email.substringBefore("@")
+            uiScope.launch {
+                try {
+                    val result = cm.getCredential(
+                        request = request,
+                        context = this@MainActivity
+                    )
+                    val credential = result.credential
+                    if (credential is CustomCredential &&
+                        credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
+                    ) {
+                        val googleCred = GoogleIdTokenCredential.createFrom(credential.data)
+                        val email = googleCred.id
+                        val displayName = googleCred.displayName ?: email.substringBefore("@")
 
-                    getSharedPreferences(AUTH_PREFS, MODE_PRIVATE)
-                        .edit()
-                        .putString("user_email", email)
-                        .putString("user_name", displayName)
-                        .apply()
+                        getSharedPreferences(AUTH_PREFS, MODE_PRIVATE)
+                            .edit()
+                            .putString("user_email", email)
+                            .putString("user_name", displayName)
+                            .apply()
 
-                    val vault = getSharedPreferences("user_profile_vault", MODE_PRIVATE)
-                    if (vault.getString("name_en", "").isNullOrBlank()) {
-                        vault.edit().putString("name_en", displayName).apply()
+                        val vault = getSharedPreferences("user_profile_vault", MODE_PRIVATE)
+                        if (vault.getString("name_en", "").isNullOrBlank()) {
+                            vault.edit().putString("name_en", displayName).apply()
+                        }
+
+                        Toast.makeText(this@MainActivity, "स्वागत है, $displayName ✨", Toast.LENGTH_SHORT).show()
+                        requestEssentialPermissions()
+                        rebuildEntireScreen()
+                    } else {
+                        statusTv.text = "अकाउंट प्रकार समर्थित नहीं है, पुनः प्रयास करें।"
                     }
-
-                    Toast.makeText(this@MainActivity, "स्वागत है, $displayName ✨", Toast.LENGTH_SHORT).show()
-                    requestEssentialPermissions()
-                    rebuildEntireScreen()
-                } else {
-                    statusTv.text = "अकाउंट प्रकार समर्थित नहीं है, पुनः प्रयास करें।"
+                } catch (e: GetCredentialException) {
+                    statusTv.text = "साइन-इन संदेश: ${e.message ?: "Google Cloud Clients में SHA-1 जोड़ें या नीचे से आगे बढ़ें"}"
+                } catch (e: Throwable) {
+                    statusTv.text = "एरर: ${e.message}"
                 }
-            } catch (e: GetCredentialException) {
-                statusTv.text = "साइन-इन संदेश: ${e.message ?: "Google Cloud Clients में SHA-1 जोड़ें या नीचे से आगे बढ़ें"}"
-            } catch (e: Exception) {
-                statusTv.text = "एरर: ${e.message}"
             }
+        } catch (e: Throwable) {
+            statusTv.text = "Google Sign-In त्रुटि: ${e.message}"
         }
     }
 
     private fun requestEssentialPermissions() {
-        val perms = mutableListOf(
-            Manifest.permission.RECORD_AUDIO,
-            Manifest.permission.CALL_PHONE,
-            Manifest.permission.READ_CONTACTS
-        )
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            perms.add(Manifest.permission.ANSWER_PHONE_CALLS)
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            perms.add(Manifest.permission.POST_NOTIFICATIONS)
-        }
-        val missing = perms.filter {
-            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
-        }
-        if (missing.isNotEmpty()) {
-            ActivityCompat.requestPermissions(this, missing.toTypedArray(), 101)
-        }
+        try {
+            val perms = mutableListOf(
+                Manifest.permission.RECORD_AUDIO,
+                Manifest.permission.CALL_PHONE,
+                Manifest.permission.READ_CONTACTS
+            )
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                perms.add(Manifest.permission.ANSWER_PHONE_CALLS)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                perms.add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+            val missing = perms.filter {
+                ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+            }
+            if (missing.isNotEmpty()) {
+                ActivityCompat.requestPermissions(this, missing.toTypedArray(), 101)
+            }
+        } catch (_: Exception) { }
     }
 
     private fun isAccessibilityEnabled(): Boolean {
-        val am = getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
-        val list = am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
-        return list.any { it.resolveInfo.serviceInfo.packageName == packageName }
+        return try {
+            val am = getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
+            val list = am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+            list.any { it.resolveInfo.serviceInfo.packageName == packageName }
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun rebuildEntireScreen() {
@@ -792,7 +853,6 @@ class MainActivity : AppCompatActivity() {
             setPadding(32, 12, 32, 40)
         }
 
-        // Google Account Card
         val auth = getSharedPreferences(AUTH_PREFS, MODE_PRIVATE)
         val email = auth.getString("user_email", "Not signed in").orEmpty()
         val uName = auth.getString("user_name", "User").orEmpty()
@@ -822,8 +882,8 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener {
                 uiScope.launch {
                     try {
-                        credentialManager.clearCredentialState(ClearCredentialStateRequest())
-                    } catch (_: Exception) { }
+                        credentialManager?.clearCredentialState(ClearCredentialStateRequest())
+                    } catch (_: Throwable) { }
                     getSharedPreferences(AUTH_PREFS, MODE_PRIVATE)
                         .edit().remove("user_email").remove("user_name").apply()
                     showGoogleSignInScreen()
@@ -966,7 +1026,6 @@ class MainActivity : AppCompatActivity() {
         val textPrimary = if (isDarkMode) Color.WHITE else Color.parseColor("#0F172A")
         val textSub = if (isDarkMode) Color.parseColor("#94A3B8") else Color.parseColor("#64748B")
 
-        // Refresh Schedule List
         scheduledListContainer.removeAllViews()
         val tasks = ScheduledTaskReceiver.getAllTasks(this)
         if (tasks.isEmpty()) {
@@ -1010,7 +1069,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Refresh History List
         historyListContainer.removeAllViews()
         val rawLogs = getSharedPreferences("nischay_task_history", MODE_PRIVATE).getString("logs", "[]").orEmpty()
         val arr = try { JSONArray(rawLogs) } catch (_: Exception) { JSONArray() }
