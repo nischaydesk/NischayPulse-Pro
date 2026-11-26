@@ -97,6 +97,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        installCrashDiagnostics()
         try {
             credentialManager = CredentialManager.create(this)
         } catch (_: Throwable) {
@@ -121,31 +122,49 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun showCrashRecoveryScreen(err: Throwable) {
+    private fun installCrashDiagnostics() {
+        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            val report = "Uncaught error on ${thread.name}\n\n${error.stackTraceToString()}"
+            val display = Runnable {
+                try {
+                    showCrashRecoveryScreen(report)
+                } catch (_: Throwable) {
+                    android.util.Log.e("NischayPulse", report)
+                }
+            }
+            if (Looper.myLooper() == Looper.getMainLooper()) display.run()
+            else runOnUiThread(display)
+        }
+    }
+    private fun showCrashRecoveryScreen(err: Throwable) = showCrashRecoveryScreen(err.stackTraceToString())
+    private fun showCrashRecoveryScreen(report: String) {
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             setBackgroundColor(Color.parseColor("#050811"))
-            setPadding(32, 32, 32, 32)
+            setPadding(24, 24, 24, 24)
         }
         val tv = TextView(this).apply {
-            text = "Nischay Pulse Error:\n\n${err.javaClass.simpleName}: ${err.message}"
-            textSize = 13f
+            text = "Nischay Pulse crash diagnostic\n\n$report"
+            textSize = 12f
             setTextColor(Color.parseColor("#FACC15"))
+            setTextIsSelectable(true)
         }
+        val scroll = android.widget.ScrollView(this).apply { addView(tv) }
+        box.addView(scroll, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+        ))
         val btn = Button(this).apply {
-            text = "डैशबोर्ड खोलें"
+            text = "डैशबोर्ड फिर खोलें"
             setOnClickListener {
-                try {
-                    rebuildEntireScreen()
-                } catch (_: Throwable) { }
+                try { rebuildEntireScreen() } catch (e: Throwable) {
+                    showCrashRecoveryScreen(e)
+                }
             }
         }
-        box.addView(tv)
         box.addView(btn)
         setContentView(box)
     }
-
     override fun onResume() {
         super.onResume()
         if (::engineBadge.isInitialized) {
